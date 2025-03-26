@@ -31,53 +31,64 @@ namespace PersonsWebApi.Infrastructure.Database
 
         private void OnBeforeSaveChanges()
         {
+            // 1. Snapshot the current tracked entries so we don’t modify them as we iterate.
+            var entries = ChangeTracker.Entries().ToList();
 
-            ChangeTracker.DetectChanges();
-            foreach (var entry in ChangeTracker.Entries())
+            // 2. Create lists to hold all the new or updated PersonAudit objects.
+            var auditsToAdd = new List<PersonAudit>();
+            var auditsToUpdate = new List<PersonAudit>();
+
+            foreach (var entry in entries)
             {
-                if (entry.Entity is Person && entry.State == EntityState.Added)
-                {
-                    var addedPerson = (Person)entry.Entity;
-                    var auditEntry = new PersonAudit()
-                    {
-                        PersonId = addedPerson.Id,
-                        Firstname = addedPerson.Firstname,
-                        LastName = addedPerson.LastName,
-                        Age = addedPerson.Age,
-                        Salary = addedPerson.Salary,
-                        LogInstance = 0
-                    };
-                    PersonsAudit.Add(auditEntry);
-                }
-
-
-                if (entry.Entity is Person && entry.State == EntityState.Modified)
-                {
-                    var updatedPerson = (Person)entry.Entity;
-
-                    var personsAuditById = PersonsAudit.Where(x => x.PersonId == updatedPerson.Id).ToList();
-
-                    foreach (var person in personsAuditById)
-                    {
-                        person.LogInstance += 1;
-                        PersonsAudit.Attach(person);
-                        this.Entry(person).State = EntityState.Modified;
-                    }
-
-                    var auditEntry = new PersonAudit()
-                    {
-                        PersonId = updatedPerson.Id,
-                        Firstname = updatedPerson.Firstname,
-                        LastName = updatedPerson.LastName,
-                        Age = updatedPerson.Age,
-                        Salary = updatedPerson.Salary,
-                        LogInstance = 0
-                    };
-                    PersonsAudit.Add(auditEntry);
-                }
-                else
+                // We only care if it’s a Person
+                if (entry.Entity is not Person person)
                     continue;
+
+                if (entry.State == EntityState.Added)
+                {
+                    // We will create a new audit record
+                    auditsToAdd.Add(new PersonAudit
+                    {
+                        PersonId = person.Id,
+                        Firstname = person.Firstname,
+                        LastName = person.LastName,
+                        Age = person.Age,
+                        Salary = person.Salary,
+                        LogInstance = 0
+                    });
+                }
+                else if (entry.State == EntityState.Modified)
+                {
+                    auditsToAdd.Add(new PersonAudit
+                    {
+                        PersonId = person.Id,
+                        Firstname = person.Firstname,
+                        LastName = person.LastName,
+                        Age = person.Age,
+                        Salary = person.Salary,
+                        LogInstance = 0
+                    });
+
+                    var personsAuditById = PersonsAudit
+                        .Where(x => x.PersonId == person.Id)
+                        .ToList();
+
+                    foreach (var auditRow in personsAuditById)
+                    {
+                        auditRow.LogInstance += 1;
+                        auditsToUpdate.Add(auditRow);
+                    }
+                }
             }
+
+            foreach (var existingAudit in auditsToUpdate)
+            {
+                PersonsAudit.Attach(existingAudit);
+                Entry(existingAudit).State = EntityState.Modified;
+            }
+
+            PersonsAudit.AddRange(auditsToAdd);
         }
+
     }
 }
